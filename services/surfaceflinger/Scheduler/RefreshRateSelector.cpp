@@ -703,6 +703,25 @@ auto RefreshRateSelector::getRankedFrameRatesLocked(const std::vector<LayerRequi
         }
     }
 
+    // While an app plays a video (ExplicitExactOrMultiple) and the screen is not touched, the
+    // Max votes of the other layers of that app are ignored. Layers that update too irregularly
+    // for the heuristic vote Max, such as the YouTube window around its video, which flipped
+    // the display between 60 and 120 Hz all through 60 fps videos. Max votes of other apps,
+    // such as the notification shade or the pen pop-ups, still raise the rate.
+    std::vector<uid_t> videoUids;
+    if (!signals.touch) {
+        for (const auto* layerPtr : layers) {
+            if (layerPtr->vote == LayerVoteType::ExplicitExactOrMultiple &&
+                layerPtr->ownerUid != static_cast<uid_t>(-1)) {
+                videoUids.push_back(layerPtr->ownerUid);
+            }
+        }
+    }
+    const auto isIgnoredMaxVote = [&videoUids](const LayerRequirement& layer) {
+        return layer.vote == LayerVoteType::Max &&
+                std::find(videoUids.begin(), videoUids.end(), layer.ownerUid) != videoUids.end();
+    };
+
     int noVoteLayers = 0;
     // Layers that prefer the same mode ("no-op").
     int noPreferenceLayers = 0;
@@ -726,7 +745,13 @@ auto RefreshRateSelector::getRankedFrameRatesLocked(const std::vector<LayerRequi
                 minVoteLayers++;
                 break;
             case LayerVoteType::Max:
-                maxVoteLayers++;
+                if (isIgnoredMaxVote(layer)) {
+                    SFTRACE_FORMAT_INSTANT("Ignoring the Max vote of %s for its video",
+                                           layer.name.c_str());
+                    noVoteLayers++;
+                } else {
+                    maxVoteLayers++;
+                }
                 break;
             case LayerVoteType::ExplicitDefault:
                 explicitDefaultVoteLayers++;
@@ -861,7 +886,7 @@ auto RefreshRateSelector::getRankedFrameRatesLocked(const std::vector<LayerRequi
               layer.desiredRefreshRate.getValue(),
               ftl::enum_string(layer.frameRateCategory).c_str());
         if (layer.isNoVote() || layer.frameRateCategory == FrameRateCategory::NoPreference ||
-            layer.vote == LayerVoteType::Min) {
+            layer.vote == LayerVoteType::Min || isIgnoredMaxVote(layer)) {
             ALOGV("%s scoring skipped due to vote", formatLayerInfo(layer, layer.weight).c_str());
             continue;
         }
