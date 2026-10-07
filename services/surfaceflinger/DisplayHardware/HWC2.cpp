@@ -348,6 +348,17 @@ Error Display::getHdrCapabilities(HdrCapabilities* outCapabilities) const
         return error;
     }
 
+    // The panel of the Lenovo Yoga Tab Plus / YOGA Pad Pro supports Dolby
+    // Vision, but its composer does not list it: the Dolby Vision decoder maps
+    // the video to the panel itself (dolby_vision.cfg), as on the stock
+    // firmware. List it with HDR10 on the built-in display, so apps offer
+    // Dolby Vision streams.
+    if (std::find(hdrTypes.begin(), hdrTypes.end(), Hwc2::Hdr::HDR10) != hdrTypes.end() &&
+        std::find(hdrTypes.begin(), hdrTypes.end(), Hwc2::Hdr::DOLBY_VISION) == hdrTypes.end() &&
+        getConnectionType().value_opt() == ui::DisplayConnectionType::Internal) {
+        hdrTypes.push_back(Hwc2::Hdr::DOLBY_VISION);
+    }
+
     *outCapabilities =
             HdrCapabilities(std::move(hdrTypes), maxLuminance, maxAverageLuminance, minLuminance);
     return Error::NONE;
