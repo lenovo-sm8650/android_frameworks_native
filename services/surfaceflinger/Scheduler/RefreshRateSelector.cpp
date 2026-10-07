@@ -824,11 +824,23 @@ auto RefreshRateSelector::getRankedFrameRatesLocked(const std::vector<LayerRequi
     // Only if all layers want Min we should return Min
     if (noVoteLayers + minVoteLayers == layers.size()) {
         ALOGV("All layers Min");
+        const auto minPredicate = [&](const FrameRateMode& mode) {
+            return !smoothSwitchOnly || mode.modePtr->getId() == activeModeId;
+        };
+        // A static screen that still draws now and then stays at the lowest
+        // rate of at least 60 Hz. The idle timer (no frames at all) still drops
+        // to the policy minimum, which gives 30 -> 60 -> 120 Hz steps.
+        std::optional<DisplayModeId> staticModeOpt;
+        for (const auto& mode : mPrimaryFrameRates) {
+            using namespace fps_approx_ops;
+            if (mode.modePtr->getGroup() == activeMode.getGroup() && mode.fps >= 60_Hz &&
+                mode.fps == mode.modePtr->getPeakFps() && minPredicate(mode)) {
+                staticModeOpt = mode.modePtr->getId();
+                break;
+            }
+        }
         const auto ranking = rankFrameRates(activeMode.getGroup(), RefreshRateOrder::Ascending,
-                                            std::nullopt, [&](FrameRateMode mode) {
-                                                return !smoothSwitchOnly ||
-                                                        mode.modePtr->getId() == activeModeId;
-                                            });
+                                            staticModeOpt, minPredicate);
         SFTRACE_FORMAT_INSTANT("%s (All layers Min)",
                                to_string(ranking.front().frameRateMode.fps).c_str());
         return {ranking, kNoSignals};
